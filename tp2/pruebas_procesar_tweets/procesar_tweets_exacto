@@ -1,0 +1,186 @@
+#!/usr/bin/python3
+
+"""Implementa procesar_tweets de manera exacta, compara soluciones.
+"""
+
+import argparse
+import collections
+import difflib
+import heapq
+import itertools
+import math
+import sys
+
+def yield_topk(iterin, n, k):
+    """Lee grupos de n líneas de iterin, y devuelve los sucesivos top-k.
+    """
+    counts = collections.defaultdict(int)
+    topics = set()
+
+    for i, line in enumerate(iterin, 1):
+        user, *rest = line.strip().split(",")
+        for t in rest:
+            counts[t] += 1
+            topics.add(t)
+        if i % n == 0:
+            yield top_k({t: counts[t] for t in topics}, k)
+            topics.clear()
+
+    if topics:
+        yield top_k({t: counts[t] for t in topics}, k)
+
+
+def top_k(counts, k):
+    """Dado un diccionario de frecuencias, devuelve los top-k ítems.
+
+    El diccionario tiene la forma {id: freq}. Se devuelve una lista
+    de tuplas (id, freq), ordenadas descendentemente por freq.
+    """
+    # Usamos nsmallest() para poder resolver empates alfabéticamente.
+    return heapq.nsmallest(k, counts.items(), key=lambda p: (-p[1], p[0]))
+
+
+def parse_counts(iterin, k):
+    """Lee k líneas del iterador, en formato "FREQ TOPIC".
+
+    Devuelve un diccionario {TOPIC: FREQ}.
+    """
+    counts = {}
+
+    for line in itertools.islice(iterin, k):
+        try:
+            freq, topic = line.split()
+            counts[topic] = int(freq)
+        except ValueError:
+            # TODO: el estado de salida global debería ser 1?
+            print(f"Línea no válida: {line!r}", file=sys.stderr)
+
+    return counts
+
+
+def parse_solution(iterin, unused_n, k):
+    """Lee una salida anterior y produce los ítems que yield_topk().
+
+    Lanza TypeError/ValueError/AssertionError si el formato de la
+    entrada es incorrecto.
+    """
+    i = 0
+    pairs = []
+    stanza = 1
+
+    for line in iterin:
+        if i == 0:
+            i = k
+            assert line == f"--- {stanza}\n"
+        else:
+            i -= 1
+            freq, topic = line.split()
+            pairs.append((topic, int(freq)))
+        if i == 0:
+            assert(len(pairs) == k)
+            top_k = sorted(pairs, key=lambda t: t[1], reverse=True)
+            pairs = []
+            stanza += 1
+            yield top_k
+
+    if pairs:
+        yield sorted(pairs, key=lambda t: t[1], reverse=True)
+
+
+def report_diff(exacta, approx):
+    """
+    """
+    len_a = len(exacta)
+    len_b = len(approx)
+    keys_a = sorted(exacta)
+    keys_b = sorted(approx)
+    need_diff = True
+    if len_a != len_b:
+        print(f"ERROR: se esperaban {len_a} ítems, se encontraron {len_b}")
+    elif keys_a != keys_b:
+        print(f"AVISO: el conjunto de topics difiere a la solución exacta")
+    else:
+        need_diff = False
+    if need_diff:
+        for i, line in enumerate(difflib.unified_diff(keys_a, keys_b), 1):
+            if i > 3:
+                print(line)
+
+
+def cosine_similarity(exacta, approx):
+    """
+    """
+    # https://stackoverflow.com/a/35981085/848301
+    keys = list(exacta)
+    freq1 = [exacta[k] for k in keys]
+    freq2 = [approx.get(k, 0) for k in keys]
+    sqroot = lambda l: math.sqrt(sum(x * x for x in l))
+    num = sum(x * y for x, y in zip(freq1, freq2))
+    den = sqroot(freq1) * sqroot(freq2)
+    return num / den
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("n", type=positive_int)
+    parser.add_argument("k", type=positive_int)
+    parser.add_argument("--compare", type=argparse.FileType("r"),
+                        metavar="FILE",
+                        help="Archivo con la solución aproximada")
+    parser.add_argument("--exacta", type=argparse.FileType("r"),
+                        metavar="FILE",
+                        help="Archivo con la solución exacta (cache)")
+
+    args = parser.parse_args()
+    n, k = args.n, args.k
+    compare = args.compare
+
+    # Unificar variables para el loop de abajo.
+    parse_fun = yield_topk
+    file_input = sys.stdin
+
+    if args.exacta:
+        if not compare:
+            # Calcular la solución y compararla a la dada.
+            compare = args.exacta
+        else:
+            # No calcular la solución, usar la exacta proporcionada.
+            parse_fun = parse_solution
+            file_input = args.exacta
+
+    for i, top_k in enumerate(parse_fun(file_input, n, k), 1):
+        header = f"--- {i}"
+        print(header)
+        if compare is None:
+            # Imprimir como si fuéramos procesar_tweets.
+            for topic, freq in top_k:
+                print(f"{freq} {topic}")
+        else:
+            # Comparar con la solución propuesta.
+            header_in = compare.readline().rstrip("\n")
+            if header_in != header:
+                # TODO: el estado de salida global debería ser 1?
+                print(f"AVISO: se encontró {header_in!r} en lugar de {header!r}",
+                      file=sys.stderr)
+            exacta = dict(top_k)
+            approx = parse_counts(compare, k)
+            report_diff(exacta, approx)
+            if set(approx).isdisjoint(exacta):
+                print(f"Similitud con solución exacta: N/A")
+            else:
+                similarity = cosine_similarity(exacta, approx)
+                print(f"Similitud con solución exacta: {similarity:.4}")
+
+
+def positive_int(arg):
+    try:
+        x = int(arg)
+        if x > 0:
+            return x
+    except ValueError:
+        pass
+    raise argparse.ArgumentTypeError("debe ser un entero positivo")
+
+
+if __name__ == "__main__":
+   sys.exit(main())

@@ -1,0 +1,3 @@
+admin,1234,pass
+admin,dev,pass,debian,dev
+admin,systema

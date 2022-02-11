@@ -1,0 +1,4 @@
+Jorge,mac,data
+Mile,sisop,viernes
+Fede,lel,hielo
+Cami,spotify,ranking
